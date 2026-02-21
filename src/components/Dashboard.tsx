@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area 
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 import { 
   Shield, AlertTriangle, CloudRain, Waves, Activity, Info, Map as MapIcon, 
@@ -61,11 +61,18 @@ export default function Dashboard() {
       fetch(`/api/forecast/${selectedId}?days=30`)
         .then(res => res.json())
         .then(data => setForecast(data.forecast || []));
+    } else if (selectedDistrict) {
+      fetch(`/api/history/district/${encodeURIComponent(selectedDistrict)}`)
+        .then(res => res.json())
+        .then(setHistory);
+      fetch(`/api/forecast/district/${encodeURIComponent(selectedDistrict)}?days=30`)
+        .then(res => res.json())
+        .then(data => setForecast(data.forecast || []));
     } else {
       setHistory([]);
       setForecast([]);
     }
-  }, [selectedId]);
+  }, [selectedId, selectedDistrict]);
 
   const runAIAnalysis = async () => {
     setAnalyzing(true);
@@ -112,16 +119,21 @@ export default function Dashboard() {
   const selectedPanchayat = panchayats.find(p => p.id === selectedId);
   const highRiskCount = panchayats.filter(p => getRiskLevel(p.latest_rainfall, p.latest_discharge) === 'High').length;
   const monthlyProjectionPeak = forecast.reduce((max, point) => Math.max(max, point.rainfall_mm), 0);
-  const rainfallTimeline = [
+  const monthlyDischargePeak = forecast.reduce((max, point) => Math.max(max, point.river_discharge), 0);
+  const hydroTimeline = [
     ...history.map(point => ({
       date: point.date,
       observed_rainfall: point.rainfall_mm,
-      projected_rainfall: null as number | null
+      observed_discharge: point.river_discharge,
+      projected_rainfall: null as number | null,
+      projected_discharge: null as number | null
     })),
     ...forecast.map(point => ({
       date: point.date,
       observed_rainfall: null as number | null,
-      projected_rainfall: point.rainfall_mm
+      observed_discharge: null as number | null,
+      projected_rainfall: point.rainfall_mm,
+      projected_discharge: point.river_discharge
     }))
   ];
 
@@ -250,7 +262,10 @@ export default function Dashboard() {
             <span className="text-[9px] font-bold uppercase text-slate-500 px-1">Region</span>
             <select 
               value={selectedDistrict}
-              onChange={(e) => setSelectedDistrict(e.target.value)}
+              onChange={(e) => {
+                setSelectedDistrict(e.target.value);
+                setSelectedId(undefined);
+              }}
               className="bg-transparent text-[11px] font-medium text-slate-300 focus:outline-none cursor-pointer"
             >
               <option value="" className="bg-[#0D0E11]">All Districts</option>
@@ -340,7 +355,10 @@ export default function Dashboard() {
                     selectedId={selectedId} 
                     selectedDistrict={selectedDistrict}
                     onSelect={setSelectedId} 
-                    onDistrictSelect={setSelectedDistrict}
+                    onDistrictSelect={(districtName) => {
+                      setSelectedDistrict(districtName);
+                      setSelectedId(undefined);
+                    }}
                   />
                   
                   {/* Floating Map Controls */}
@@ -520,7 +538,10 @@ export default function Dashboard() {
               selectedId={selectedId} 
               selectedDistrict={selectedDistrict}
               onSelect={setSelectedId} 
-              onDistrictSelect={setSelectedDistrict}
+              onDistrictSelect={(districtName) => {
+                      setSelectedDistrict(districtName);
+                      setSelectedId(undefined);
+                    }}
             />
             <div className="absolute top-6 left-6 z-[1000] w-80 glass-panel rounded-2xl p-6">
               <h3 className="text-xl font-bold text-white mb-2 uppercase italic tracking-tighter">Statewide Risk Matrix</h3>
@@ -561,7 +582,15 @@ export default function Dashboard() {
               {(panchayats.length > 0 ? panchayats : districts).map((item: any) => (
                 <div 
                   key={item.id || item.name}
-                  onClick={() => item.id ? setSelectedId(item.id) : setSelectedDistrict(item.name)}
+                  onClick={() => {
+                    if (item.id) {
+                      setSelectedId(item.id);
+                      setSelectedDistrict(item.district);
+                    } else {
+                      setSelectedDistrict(item.name);
+                      setSelectedId(undefined);
+                    }
+                  }}
                   className={`p-4 border-b border-white/[0.02] cursor-pointer transition-all duration-200 ${selectedId === item.id || selectedDistrict === item.name ? 'bg-emerald-500/[0.03] border-l-2 border-l-emerald-500 shadow-inner' : 'hover:bg-white/[0.02]'}`}
                 >
                   <div className="flex justify-between items-center">
@@ -613,41 +642,47 @@ export default function Dashboard() {
                     ))}
                   </div>
 
-                  {selectedPanchayat && (
+                  {hydroTimeline.length > 0 && (
                     <div className="p-8 rounded-3xl bg-white/[0.01] border border-white/5">
                       <div className="flex items-center justify-between mb-10">
-                        <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Historical Precipitation Matrix</h3>
+                        <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Hydrological Matrix // Rainfall & Discharge</h3>
                         <div className="flex gap-4">
                           <div className="flex items-center gap-2">
                             <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                            <span className="text-[9px] font-bold text-slate-400 uppercase">Rainfall (mm)</span>
+                            <span className="text-[9px] font-bold text-slate-400 uppercase">Observed Rainfall</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-blue-500" />
+                            <span className="text-[9px] font-bold text-slate-400 uppercase">Observed Discharge</span>
                           </div>
                         </div>
                       </div>
                       <div className="h-72 w-full">
                         <ResponsiveContainer width="100%" height="100%">
-                          <AreaChart data={rainfallTimeline}>
-                            <defs>
-                              <linearGradient id="colorRain" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#10B981" stopOpacity={0.2}/>
-                                <stop offset="95%" stopColor="#10B981" stopOpacity={0}/>
-                              </linearGradient>
-                            </defs>
+                          <LineChart data={hydroTimeline}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.03)" />
                             <XAxis dataKey="date" hide />
-                            <YAxis hide />
+                            <YAxis yAxisId="left" hide />
+                            <YAxis yAxisId="right" orientation="right" hide />
                             <Tooltip 
                               contentStyle={{ backgroundColor: '#0D0E11', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '8px', fontSize: '10px', fontFamily: 'JetBrains Mono' }}
                               labelFormatter={(label) => new Date(label).toLocaleDateString()}
                             />
-                            <Area type="monotone" dataKey="observed_rainfall" stroke="#10B981" fillOpacity={1} fill="url(#colorRain)" strokeWidth={2.5} connectNulls />
-                            <Line type="monotone" dataKey="projected_rainfall" stroke="#60A5FA" strokeWidth={2} strokeDasharray="5 5" dot={false} connectNulls />
-                          </AreaChart>
+                            <Line yAxisId="left" type="monotone" dataKey="observed_rainfall" name="Observed Rainfall (mm)" stroke="#10B981" strokeWidth={2.5} dot={false} connectNulls />
+                            <Line yAxisId="left" type="monotone" dataKey="projected_rainfall" name="Projected Rainfall (mm)" stroke="#34D399" strokeWidth={2} strokeDasharray="5 5" dot={false} connectNulls />
+                            <Line yAxisId="right" type="monotone" dataKey="observed_discharge" name="Observed Discharge (m³/s)" stroke="#3B82F6" strokeWidth={2.5} dot={false} connectNulls />
+                            <Line yAxisId="right" type="monotone" dataKey="projected_discharge" name="Projected Discharge (m³/s)" stroke="#60A5FA" strokeWidth={2} strokeDasharray="5 5" dot={false} connectNulls />
+                          </LineChart>
                         </ResponsiveContainer>
                       </div>
-                      <p className="mt-4 text-[10px] uppercase tracking-[0.2em] text-slate-500">
-                        30-Day projected rainfall peak: <span className="text-blue-400 font-bold">{monthlyProjectionPeak.toFixed(1)}mm</span>
-                      </p>
+                      <div className="mt-4 grid grid-cols-2 gap-4 text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                        <p>
+                          30-Day projected rainfall peak: <span className="text-emerald-400 font-bold">{monthlyProjectionPeak.toFixed(1)}mm</span>
+                        </p>
+                        <p>
+                          30-Day projected discharge peak: <span className="text-blue-400 font-bold">{monthlyDischargePeak.toFixed(1)}m³/s</span>
+                        </p>
+                      </div>
                     </div>
                   )}
                 </div>
