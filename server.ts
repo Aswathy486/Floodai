@@ -608,6 +608,21 @@ async function startServer() {
     res.json(data.map((d: any) => d.district));
   });
 
+  app.get("/api/history/district/:district", (req, res) => {
+    const data = db.prepare(`
+      SELECT
+        r.date,
+        AVG(r.rainfall_mm) as rainfall_mm,
+        AVG(r.river_discharge) as river_discharge
+      FROM rainfall_data r
+      JOIN panchayats p ON p.id = r.panchayat_id
+      WHERE p.district = ?
+      GROUP BY r.date
+      ORDER BY r.date ASC
+    `).all(req.params.district);
+    res.json(data);
+  });
+
   app.get("/api/history/:panchayatId", (req, res) => {
     const data = db.prepare(`
       SELECT * FROM rainfall_data 
@@ -615,6 +630,33 @@ async function startServer() {
       ORDER BY date ASC
     `).all(req.params.panchayatId);
     res.json(data);
+  });
+
+  app.get("/api/forecast/district/:district", (req, res) => {
+    const days = Number(req.query.days || 30);
+    const boundedDays = clamp(days, 7, 30);
+    const history = db.prepare(`
+      SELECT
+        r.date as date,
+        AVG(r.rainfall_mm) as rainfall_mm,
+        AVG(r.river_discharge) as river_discharge
+      FROM rainfall_data r
+      JOIN panchayats p ON p.id = r.panchayat_id
+      WHERE p.district = ?
+      GROUP BY r.date
+      ORDER BY r.date ASC
+    `).all(req.params.district) as HistoryRow[];
+
+    if (history.length === 0) {
+      return res.status(404).json({ error: "District history not found" });
+    }
+
+    const forecast = buildMonthlyForecast(history, boundedDays);
+    return res.json({
+      district: req.params.district,
+      horizon_days: boundedDays,
+      forecast
+    });
   });
 
 
